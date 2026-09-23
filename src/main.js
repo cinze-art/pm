@@ -35,7 +35,7 @@ const statusLabel = n => Number(n||0)>0 ? money(n) : '—';
 
 function shell(){
   app.innerHTML=`<div class="noise"></div><header class="topbar"><button class="iconbtn backIcon" id="backBtn" title="Kembali">←</button><button class="iconbtn homeIcon" data-nav="home" title="Home">⌂</button><div class="brand"><img src="/assets/pm_logo_transparent.png"><div><b>PEMUDA MAWE</b><span>Guyub • Rukun • Sejahtera</span></div></div><nav>
-  <button data-nav="dashboard">Dashboard</button><button data-nav="organisasi">Organisasi</button><button data-nav="agenda">Agenda</button><button data-nav="jimpitan">Jimpitan</button><button data-nav="laporan">Laporan</button><button data-nav="dataKK">Data KK</button><button data-nav="penarikan">Penarikan</button><button data-nav="admin">Admin</button></nav><button id="menuBtn" class="iconbtn">☰</button></header><main id="page"></main><footer>PEMUDA MAWE <span>•</span> GUYUB RUKUN SEJAHTERA <small>v10 UI</small></footer>`;
+  <button data-nav="dashboard">Dashboard</button><button data-nav="organisasi">Organisasi</button><button data-nav="agenda">Agenda</button><button data-nav="jimpitan">Jimpitan</button><button data-nav="laporan">Laporan</button><button data-nav="dataKK">Data KK</button><button data-nav="admin">Admin</button></nav><button id="menuBtn" class="iconbtn">☰</button></header><main id="page"></main><footer>PEMUDA MAWE <span>•</span> GUYUB RUKUN SEJAHTERA <small>v10 UI</small></footer>`;
   document.querySelector('.topbar').classList.toggle('insideView',state.view!=='home');
   document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>go(b.dataset.nav));
   document.querySelector('#backBtn').onclick=()=>{const target=state.previousView||'home';state.previousView='home';go(target);};
