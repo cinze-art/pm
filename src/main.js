@@ -115,6 +115,11 @@ function programMonthCount(program){
  const start=new Date(`${program.tanggal_mulai}T00:00:00`),end=new Date(`${program.tanggal_selesai}T00:00:00`);
  return Math.max(1,(end.getFullYear()-start.getFullYear())*12+end.getMonth()-start.getMonth()+1);
 }
+function programMonths(program){
+ if(!program?.tanggal_mulai||!program?.tanggal_selesai)return MONTHS.map((label,month)=>({label,month,year:state.reportYear}));
+ const start=new Date(`${program.tanggal_mulai}T00:00:00`),count=programMonthCount(program);
+ return Array.from({length:count},(_,index)=>{const date=new Date(start);date.setMonth(start.getMonth()+index);return {label:MONTHS[date.getMonth()],month:date.getMonth(),year:date.getFullYear()};});
+}
 function jimpitanDisplayTotals(rows){
  const totals=new Map();
  const filled=new Map();
@@ -126,36 +131,38 @@ function jimpitanDisplayTotals(rows){
   if(!remaining||!monthly)return;
   const date=transaction.jimpitan_schedule?.tanggal;
   let month=date?Number(date.slice(5,7))-1:0;
+  let year=date?Number(date.slice(0,4)):state.reportYear;
   let guard=0;
   while(remaining>0.0001&&guard<120){
-   const allocationKey=`${transaction.kk_id}:${program?.id||'program'}:${month}`;
+  const allocationKey=`${transaction.kk_id}:${program?.id||'program'}:${year*12+month}`;
    const used=filled.get(allocationKey)||0;
    const room=Math.max(0,monthly-used);
    const allocation=Math.min(remaining,room);
    if(allocation){
     filled.set(allocationKey,used+allocation);
-    const totalKey=`${transaction.kk_id}:${month}`;
+    const totalKey=`${transaction.kk_id}:${year*12+month}`;
     totals.set(totalKey,(totals.get(totalKey)||0)+allocation);
     remaining-=allocation;
    }
-   month++;guard++;
+  month++;if(month>11){month=0;year++;}guard++;
   }
  });
- return (kkId,month)=>totals.get(`${kkId}:${month-1}`)||0;
+ return (kkId,year,month)=>totals.get(`${kkId}:${year*12+month}`)||0;
 }
 
 function jimpitan(){
  const rows=state.reportTransactions||[];
  const selectedRt=state.reportRt==='all'?'all':Number(state.reportRt);
  const selectedProgram=state.reportProgram==='all'?null:state.programs.find(p=>String(p.id)===String(state.reportProgram));
+ const matrixMonths=programMonths(selectedProgram);
  const visibleKks=state.kks.filter(k=>selectedRt==='all'||Number(k.rt)===selectedRt).filter(k=>!state.search||k.nama.toLowerCase().includes(state.search.toLowerCase()));
  const displayTotal=jimpitanDisplayTotals(rows);
- const monthTotals=(kkId,m)=>displayTotal(kkId,m);
- const collectorNames=m=>{if(selectedRt==='all')return 'Pilih RT';const key=`${selectedRt}:${m}`;return state.matrixCollectorNames[key]||(()=>{const names=[...new Set(rows.filter(x=>(Number(x.kk?.rt)===selectedRt)&&x.jimpitan_schedule?.tanggal?.slice(5,7)===String(m).padStart(2,'0')).map(x=>x.penarikan_session?.nama_penarik).filter(Boolean).filter(x=>String(x).trim().toLowerCase()!=='admin'))];return names.length?names.join(', '):'—';})();};
- const grand=m=>visibleKks.reduce((a,k)=>a+monthTotals(k.id,m),0);
+ const monthTotals=(kkId,month,year)=>displayTotal(kkId,year,month);
+ const collectorNames=({month,year})=>{if(selectedRt==='all')return 'Pilih RT';const key=`${selectedRt}:${year}:${month+1}`;return state.matrixCollectorNames[key]||(()=>{const names=[...new Set(rows.filter(x=>(Number(x.kk?.rt)===selectedRt)&&String(x.jimpitan_schedule?.tanggal||'').slice(0,7)===`${year}-${String(month+1).padStart(2,'0')}`).map(x=>x.penarikan_session?.nama_penarik).filter(Boolean).filter(x=>String(x).trim().toLowerCase()!=='admin'))];return names.length?names.join(', '):'—';})();};
+ const grand=month=>visibleKks.reduce((a,k)=>a+monthTotals(k.id,month.month,month.year),0);
  return `<section class="section wide jimpitanPage"><div class="pageHero compactHero"><div><div class="eyebrow">◉ LAPORAN JIMPITAN</div><h1>JIMPITAN</h1><p>Bersama, Ringan di Tangan, Berat di Keikhlasan</p></div><div class="heroActionGroup">${state.session?`<button class="primary" id="newProgram">+ PROGRAM BARU</button><button class="secondary" data-nav="admin">KELOLA PROGRAM</button>`:`<button class="secondary" data-nav="laporan">LIHAT LAPORAN</button>`}</div></div>
  <div class="jimpitanToolbar"><div class="rtPills">${state.rts.map(r=>`<button class="rtPill ${String(state.reportRt)===String(r.id)?'active':''}" data-report-rt="${r.id}">${esc(r.nama)}</button>`).join('')}<button class="rtPill ${state.reportRt==='all'?'active':''}" data-report-rt="all">Semua</button></div><div class="jimpitanTools"><select id="reportProgram"><option value="all">Semua Jenis / Program</option>${state.programs.map(p=>`<option value="${p.id}" ${String(p.id)===String(state.reportProgram)?'selected':''}>${esc(p.nama_program)}</option>`).join('')}</select>${state.session?`<button class="secondary" id="addKK">+ KK</button><button class="secondary" id="importKK">Upload KK</button>`:''}</div></div>
- <div class="jimpitanMatrixPanel"><div class="matrixCaption"><div><b>${esc(selectedProgram?.nama_program||'Semua Program Jimpitan')}</b><span>${selectedProgram?`Target ${money(selectedProgram.target_nominal)} / KK • Rata-rata ${money(selectedProgram.target_nominal/programMonthCount(selectedProgram))} / bulan`:'Rata-rata cicilan per bulan'}</span></div><span>${selectedRt==='all'?'Semua RT':esc(rtName(selectedRt))} • ${state.reportYear}</span></div><div class="tableWrap matrixDarkWrap"><table class="jimpitanMatrix darkMatrix"><thead><tr><th class="sticky">No</th><th class="sticky second">Nama KK</th><th>Iuran</th>${MONTHS.map(m=>`<th>${m.slice(0,3).toUpperCase()}</th>`).join('')}<th>TOTAL</th></tr></thead><tbody>${visibleKks.length?visibleKks.map((k,i)=>{const vals=MONTHS.map((_,m)=>monthTotals(k.id,m+1));const total=vals.reduce((a,b)=>a+b,0);return `<tr><td class="sticky rowNo">${String(i+1).padStart(2,'0')}</td><td class="sticky second"><b>${esc(k.nama)}</b><small>${esc(rtName(k.rt))}</small></td><td>${selectedProgram?money(selectedProgram.target_nominal):'—'}</td>${vals.map(v=>`<td><span class="monthCell">${v?money(v):'Rp 0'}</span></td>`).join('')}<td><b>${total?money(total):'Rp 0'}</b></td></tr>`}).join(''):`<tr><td colspan="16" class="emptyCell">Belum ada data KK.</td></tr>`}</tbody><tfoot><tr><th class="sticky">—</th><th class="sticky second">TOTAL</th><th>—</th>${MONTHS.map((_,i)=>`<th>${grand(i+1)?money(grand(i+1)):'Rp 0'}</th>`).join('')}<th>${money(MONTHS.reduce((a,_,i)=>a+grand(i+1),0))}</th></tr><tr class="collectorRow"><th class="sticky">—</th><th class="sticky second">PENARIK</th><th>—</th>${MONTHS.map((_,i)=>`<th><div class="collectorNames">${esc(collectorNames(i+1))}</div></th>`).join('')}<th>—</th></tr></tfoot></table></div></div>
+ <div class="jimpitanMatrixPanel"><div class="matrixCaption"><div><b>${esc(selectedProgram?.nama_program||'Semua Program Jimpitan')}</b><span>${selectedProgram?`Target ${money(selectedProgram.target_nominal)} / KK • Rata-rata ${money(selectedProgram.target_nominal/programMonthCount(selectedProgram))} / bulan`:'Rata-rata cicilan per bulan'}</span></div><span>${selectedRt==='all'?'Semua RT':esc(rtName(selectedRt))} • ${state.reportYear}</span></div><div class="tableWrap matrixDarkWrap"><table class="jimpitanMatrix darkMatrix"><thead><tr><th class="sticky">No</th><th class="sticky second">Nama KK</th><th>Iuran</th>${matrixMonths.map(m=>`<th>${m.label.slice(0,3).toUpperCase()}<small>${m.year}</small></th>`).join('')}<th>TOTAL</th></tr></thead><tbody>${visibleKks.length?visibleKks.map((k,i)=>{const vals=matrixMonths.map(m=>monthTotals(k.id,m.month,m.year));const total=vals.reduce((a,b)=>a+b,0);return `<tr><td class="sticky rowNo">${String(i+1).padStart(2,'0')}</td><td class="sticky second"><b>${esc(k.nama)}</b><small>${esc(rtName(k.rt))}</small></td><td>${selectedProgram?money(selectedProgram.target_nominal):'—'}</td>${vals.map(v=>`<td><span class="monthCell">${v?money(v):'Rp 0'}</span></td>`).join('')}<td><b>${total?money(total):'Rp 0'}</b></td></tr>`}).join(''):`<tr><td colspan="${matrixMonths.length+4}" class="emptyCell">Belum ada data KK.</td></tr>`}</tbody><tfoot><tr><th class="sticky">—</th><th class="sticky second">TOTAL</th><th>—</th>${matrixMonths.map(month=>`<th>${grand(month)?money(grand(month)):'Rp 0'}</th>`).join('')}<th>${money(matrixMonths.reduce((a,month)=>a+grand(month),0))}</th></tr><tr class="collectorRow"><th class="sticky">—</th><th class="sticky second">PENARIK</th><th>—</th>${matrixMonths.map(month=>`<th><div class="collectorNames">${esc(collectorNames(month))}</div></th>`).join('')}<th>—</th></tr></tfoot></table></div></div>
  <div class="jimpitanBottom"><div class="panel"><div class="panelTitle">JENIS JIMPITAN</div><div class="typeChips">${[...new Set(state.programs.map(p=>p.jenis).filter(Boolean))].map(x=>`<span>${esc(x)}</span>`).join('')||'<span class="emptyChip">Belum ada jenis</span>'}</div></div><div class="panel jimpitanHelp"><div class="panelTitle">ALUR PENARIKAN</div><p>Jadwal dibuat otomatis dari Program Jimpitan. Penarik mengisi identitas sendiri saat mulai penarikan, lalu setiap KK tetap tercatat termasuk nominal Rp0.</p><button class="secondary" data-nav="penarikan">BUKA PENARIKAN</button></div></div></section>`;
 }
 function programCard(p){return `<article class="programCard"><div class="programTop"><span class="badge">${esc(p.jenis)}</span><span class="badge ${p.aktif?'ok':''}">${p.aktif?'AKTIF':'NONAKTIF'}</span></div><h3>${esc(p.nama_program)}</h3><div class="programMeta"><span>Target</span><b>${money(p.target_nominal)}</b><span>Periode</span><b>${dateID(p.tanggal_mulai)} — ${dateID(p.tanggal_selesai)}</b><span>Frekuensi</span><b>${esc(FREQ[p.frekuensi]||p.frekuensi)}</b></div><div class="cardActions">${state.session?`<button class="secondary small" data-edit-program="${p.id}">Edit</button><button class="dangerText" data-toggle-program="${p.id}">${p.aktif?'Nonaktifkan':'Aktifkan'}</button>`:''}</div></article>`;}
@@ -276,11 +283,11 @@ function collectorNameModal(){
   document.querySelector('#appModal [data-close-modal]')?.addEventListener('click',()=>resolve(null),{once:true});
  });
 }
-async function saveMatrixCollectorName(month,input){
+async function saveMatrixCollectorName(month,year,input){
  if(!authRequired())return;
  const name=input.value.trim();if(!name)return toast('Nama penarik wajib diisi','err');
  const selectedRt=state.reportRt==='all'?'all':Number(state.reportRt);if(selectedRt==='all')return toast('Pilih RT terlebih dahulu agar nama penarik tidak tercampur','err');
- const collectorKey=`${selectedRt}:${month}`;state.matrixCollectorNames[collectorKey]=name;
+ const collectorKey=`${selectedRt}:${year}:${month+1}`;state.matrixCollectorNames[collectorKey]=name;
  const program=state.reportProgram==='all'?null:state.programs.find(x=>String(x.id)===String(state.reportProgram));
  if(program){
   const selectedRt=state.reportRt==='all'?null:Number(state.reportRt);
@@ -290,18 +297,18 @@ async function saveMatrixCollectorName(month,input){
  }
  toast('Nama penarik tersimpan');render();
 }
-async function saveMatrixNominal(kkId,month,input){
+async function saveMatrixNominal(kkId,year,month,input){
  if(!authRequired())return;
  const kk=state.kks.find(x=>String(x.id)===String(kkId));
  const program=state.reportProgram==='all'?null:state.programs.find(x=>String(x.id)===String(state.reportProgram));
  if(!kk||!program)return toast('Pilih program jimpitan terlebih dahulu','err');
  const value=parseNominal(input.value);
- const schedule=state.schedules.find(x=>x.program_id===program.id&&Number(x.rt)===Number(kk.rt)&&String(x.tanggal).slice(0,4)===String(state.reportYear)&&Number(String(x.tanggal).slice(5,7))===month);
+ const schedule=state.schedules.find(x=>x.program_id===program.id&&Number(x.rt)===Number(kk.rt)&&String(x.tanggal).slice(0,4)===String(year)&&Number(String(x.tanggal).slice(5,7))===month+1);
  if(!schedule)return toast('Jadwal bulan ini belum tersedia untuk RT tersebut','err');
  let {data:sessions,error:sessionError}=await supabase.from('penarikan_session').select('*').eq('schedule_id',schedule.id).order('started_at',{ascending:false}).limit(1);
  if(sessionError){toast(sessionError.message,'err');return;}
  let session=sessions?.[0];
- if(!session||session.nama_penarik==='Admin'){const collectorName=state.matrixCollectorNames[`${Number(kk.rt)}:${month}`]||await collectorNameModal();if(!collectorName)return;if(session){const result=await supabase.from('penarikan_session').update({nama_penarik:collectorName,identitas:'Input tabel'}).eq('id',session.id).select().single();if(result.error){toast(result.error.message,'err');return;}session=result.data;}else{const result=await supabase.from('penarikan_session').insert({schedule_id:schedule.id,nama_penarik:collectorName,identitas:'Input tabel',status:'active'}).select().single();if(result.error){toast(result.error.message,'err');return;}session=result.data;}}
+ if(!session||session.nama_penarik==='Admin'){const collectorName=state.matrixCollectorNames[`${Number(kk.rt)}:${year}:${month+1}`]||await collectorNameModal();if(!collectorName)return;if(session){const result=await supabase.from('penarikan_session').update({nama_penarik:collectorName,identitas:'Input tabel'}).eq('id',session.id).select().single();if(result.error){toast(result.error.message,'err');return;}session=result.data;}else{const result=await supabase.from('penarikan_session').insert({schedule_id:schedule.id,nama_penarik:collectorName,identitas:'Input tabel',status:'active'}).select().single();if(result.error){toast(result.error.message,'err');return;}session=result.data;}}
  const existing=state.reportTransactions?.find(x=>x.kk_id===kk.id&&x.schedule_id===schedule.id);
  const query=existing?supabase.from('jimpitan_transaction').update({nominal:value,updated_at:new Date().toISOString(),updated_by:state.session.user.id}).eq('id',existing.id):supabase.from('jimpitan_transaction').insert({schedule_id:schedule.id,session_id:session.id,kk_id:kk.id,nominal:value,confirmed_by:state.session.user.id,updated_by:state.session.user.id});
  const {error}=await query;if(error){toast(error.message,'err');return;}
@@ -309,17 +316,18 @@ async function saveMatrixNominal(kkId,month,input){
 }
 function bindJimpitanMatrix(){
  const table=document.querySelector('.darkMatrix');if(!table)return;
- const currentMonth=new Date().getMonth();const expanded=new Set(state.expandedMonths||[]);const headers=[...table.tHead.rows[0].cells];
- setTimeout(()=>{const wrap=table.closest('.tableWrap'),currentHeader=headers[currentMonth+3];if(wrap&&currentHeader)wrap.scrollTo({left:Math.max(0,currentHeader.offsetLeft-150),behavior:'smooth'});},0);
+ const headers=[...table.tHead.rows[0].cells],monthHeaders=headers.slice(3,-1),today=new Date(),todayKey=today.getFullYear()*12+today.getMonth(),headerDate=header=>{const text=header.textContent.trim(),month=MONTHS.findIndex(label=>label.slice(0,3).toUpperCase()===text.slice(0,3));return {month,year:Number(text.slice(-4))};};
+ const activeIndex=Math.max(0,monthHeaders.findIndex(header=>{const date=headerDate(header);return date.year*12+date.month>=todayKey;}));
+ setTimeout(()=>{const wrap=table.closest('.tableWrap'),currentHeader=monthHeaders[activeIndex],stickyWidth=headers.slice(0,3).reduce((total,cell)=>total+cell.getBoundingClientRect().width,0);if(wrap&&currentHeader){const currentLeft=currentHeader.getBoundingClientRect().left-wrap.getBoundingClientRect().left+wrap.scrollLeft;wrap.scrollLeft=Math.max(0,currentLeft-stickyWidth);}},0);
  const collectorCells=[...table.tFoot.querySelector('.collectorRow').cells];
- if(state.session&&state.reportRt!=='all')collectorCells.slice(3,15).forEach((cell,index)=>{const month=index+1;const existing=state.matrixCollectorNames[`${Number(state.reportRt)}:${month}`]||cell.querySelector('.collectorNames')?.textContent.trim()||'';cell.innerHTML=`<div class="collectorNames"><input value="${existing==='—'||existing.toLowerCase()==='admin'?'':esc(existing)}" placeholder="Nama penarik" aria-label="Nama penarik bulan ${month}"><button type="button" title="Simpan nama penarik">✓</button></div>`;cell.querySelector('button').onclick=()=>saveMatrixCollectorName(month,cell.querySelector('input'));});
- headers.slice(3,15).forEach((header,index)=>{
-  const month=index+1,compact=index<currentMonth&&!expanded.has(index);header.classList.toggle('monthCompact',compact);header.title=index<currentMonth?'Klik untuk membuka bulan':'Bulan aktif';
-  header.onclick=()=>{if(index>=currentMonth)return;const next=new Set(state.expandedMonths||[]);if(next.has(index))next.delete(index);else next.add(index);state.expandedMonths=[...next];render();};
+ if(state.session&&state.reportRt!=='all')collectorCells.slice(3,-1).forEach((cell,index)=>{const header=monthHeaders[index],{month,year}=headerDate(header),existing=state.matrixCollectorNames[`${Number(state.reportRt)}:${year}:${month+1}`]||cell.querySelector('.collectorNames')?.textContent.trim()||'';cell.innerHTML=`<div class="collectorNames"><input value="${existing==='—'||existing.toLowerCase()==='admin'?'':esc(existing)}" placeholder="Nama penarik" aria-label="Nama penarik ${header.textContent.trim()}"><button type="button" title="Simpan nama penarik">✓</button></div>`;cell.querySelector('button').onclick=()=>saveMatrixCollectorName(month,year,cell.querySelector('input'));});
+ monthHeaders.forEach((header,index)=>{
+  const {month,year}=headerDate(header),compact=index<activeIndex;header.classList.toggle('monthCompact',compact);header.title=compact?'Klik untuk membuka bulan':'Bulan aktif';
+  header.onclick=()=>{if(index>=activeIndex)return;const next=new Set(state.expandedMonths||[]);if(next.has(index))next.delete(index);else next.add(index);state.expandedMonths=[...next];render();};
   [...table.tBodies[0].rows].forEach(row=>{
    const nameCell=row.cells[1],monthCell=row.cells[index+3];if(!nameCell||!monthCell)return;
    monthCell.classList.toggle('monthCompact',compact);
-  if(state.session&&!monthCell.dataset.matrixAmountReady){const text=monthCell.textContent.replace(/[^0-9]/g,'');const value=text?Number(text):0;monthCell.innerHTML=`<div class="matrixAmountEdit"><input type="text" inputmode="numeric" value="${value?formatNominal(value):''}" placeholder="0" aria-label="Nominal bulan"><button type="button" title="Simpan nominal">✓</button></div>`;const amountInput=monthCell.querySelector('input');bindNominalInput(amountInput);const name=nameCell.querySelector('input')?.value||nameCell.querySelector('b')?.textContent.trim();const kk=state.kks.find(x=>x.nama===name);if(kk)monthCell.querySelector('button').onclick=()=>saveMatrixNominal(kk.id,month,amountInput);monthCell.dataset.matrixAmountReady='true';}
+  if(state.session&&!monthCell.dataset.matrixAmountReady){const text=monthCell.textContent.replace(/[^0-9]/g,'');const value=text?Number(text):0;monthCell.innerHTML=`<div class="matrixAmountEdit"><input type="text" inputmode="numeric" value="${value?formatNominal(value):''}" placeholder="0" aria-label="Nominal bulan ${month}/${year}"><button type="button" title="Simpan nominal">✓</button></div>`;const amountInput=monthCell.querySelector('input');bindNominalInput(amountInput);const name=nameCell.querySelector('input')?.value||nameCell.querySelector('b')?.textContent.trim();const kk=state.kks.find(x=>x.nama===name);if(kk)monthCell.querySelector('button').onclick=()=>saveMatrixNominal(kk.id,year,month,amountInput);monthCell.dataset.matrixAmountReady='true';}
   });
  });
 }
@@ -498,7 +506,9 @@ async function finishCollection(){
 async function loadReport(){
  if(!supabase)return;
  let q=supabase.from('jimpitan_transaction').select('*, kk(nama,rt), penarikan_session(nama_penarik), jimpitan_schedule(tanggal,program_id,jimpitan_program(nama_program,jenis,target_nominal))');
- if(state.reportYear)q=q.gte('jimpitan_schedule.tanggal',`${state.reportYear}-01-01`).lte('jimpitan_schedule.tanggal',`${state.reportYear}-12-31`);
+ const matrixProgram=state.view==='jimpitan'&&state.reportProgram!=='all'?state.programs.find(x=>String(x.id)===String(state.reportProgram)):null;
+ if(matrixProgram?.tanggal_mulai&&matrixProgram?.tanggal_selesai)q=q.gte('jimpitan_schedule.tanggal',matrixProgram.tanggal_mulai).lte('jimpitan_schedule.tanggal',matrixProgram.tanggal_selesai);
+ else if(state.reportYear)q=q.gte('jimpitan_schedule.tanggal',`${state.reportYear}-01-01`).lte('jimpitan_schedule.tanggal',`${state.reportYear}-12-31`);
  const {data,error}=await q.order('confirmed_at',{ascending:true});if(error){toast(error.message,'err');return;}
  state.reportTransactions=(data||[]).filter(x=>{
    const s=x.jimpitan_schedule||{};const month=s.tanggal?Number(s.tanggal.slice(5,7)):0;

@@ -122,6 +122,9 @@ button{transition:.18s ease}button:hover{transform:translateY(-1px)}button:activ
 .darkMatrix th{font-size:10px}
 .darkMatrix td{font-size:10px}
 .darkMatrix .monthCell{font-size:12px!important;min-width:68px;padding:7px 5px}
+.darkMatrix th:first-child,.darkMatrix td:first-child{width:42px;min-width:42px;max-width:42px;padding-left:4px;padding-right:4px}
+.darkMatrix th.second,.darkMatrix td.second{width:165px;min-width:165px;max-width:165px}
+.darkMatrix .second{left:42px}
 .darkMatrix .collectorNames{font-size:9px}
 .exportAllLabel{display:flex!important;align-items:center;gap:8px;text-transform:none!important;font-size:11px!important;cursor:pointer}
 .exportAllLabel input[type="checkbox"]{display:inline-block!important;flex:0 0 18px;width:18px!important;height:18px!important;margin:0!important;padding:0!important;accent-color:#ff1f32;cursor:pointer}
