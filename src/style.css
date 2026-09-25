@@ -109,7 +109,7 @@ button{transition:.18s ease}button:hover{transform:translateY(-1px)}button:activ
 .darkMatrix .collectorNames{font-size:10px!important}
 .matrixNameEdit,.matrixAmountEdit{display:flex;align-items:center;justify-content:center;gap:3px;min-width:0}
 .matrixNameEdit{flex-wrap:wrap;justify-content:flex-start}
-.matrixNameEdit input,.matrixAmountEdit input{height:25px;min-width:0;width:68px;padding:0 4px;border:1px solid #303a45;border-radius:6px;background:#080d13;color:#edf1f5;font-size:8px;text-align:center}
+.matrixNameEdit input,.matrixAmountEdit input{height:25px;min-width:0;width:68px;padding:0 4px;border:1px solid #303a45;border-radius:6px;background:#080d13;color:#edf1f5;font-size:12px;text-align:center}
 .matrixNameEdit input{width:112px;text-align:left}
 .matrixNameEdit button,.matrixAmountEdit button{width:24px;height:25px;padding:0;border:1px solid #168b62;border-radius:6px;background:#073b2b;color:#00e58a;font-size:12px;font-weight:900;line-height:1}
 .matrixNameEdit small{display:block;width:100%;color:#56616e;font-size:6px}
@@ -121,7 +121,7 @@ button{transition:.18s ease}button:hover{transform:translateY(-1px)}button:activ
 .darkMatrix th.monthCompact:hover,.darkMatrix td.monthCompact:hover{background:#111a23;color:#ff5360}
 .darkMatrix th{font-size:10px}
 .darkMatrix td{font-size:10px}
-.darkMatrix .monthCell{font-size:10px;min-width:68px;padding:7px 5px}
+.darkMatrix .monthCell{font-size:12px!important;min-width:68px;padding:7px 5px}
 .darkMatrix .collectorNames{font-size:9px}
 .exportAllLabel{display:flex!important;align-items:center;gap:8px;text-transform:none!important;font-size:11px!important;cursor:pointer}
 .exportAllLabel input[type="checkbox"]{display:inline-block!important;flex:0 0 18px;width:18px!important;height:18px!important;margin:0!important;padding:0!important;accent-color:#ff1f32;cursor:pointer}

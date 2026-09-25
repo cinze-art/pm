@@ -24,6 +24,9 @@ const state = {
 const app = document.querySelector('#app');
 const esc = (v='') => String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const money = n => new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(Number(n||0));
+const formatNominal = value => { const digits=String(value??'').replace(/\D/g,''); return digits?Number(digits).toLocaleString('id-ID'):''; };
+const parseNominal = value => { const digits=String(value??'').replace(/\D/g,''); return digits?Number(digits):0; };
+const bindNominalInput = input => { input.addEventListener('focus',()=>{if(parseNominal(input.value)===0)input.value='';else{input.value=input.value.replace(/\D/g,'');input.select();}});input.addEventListener('input',()=>{input.value=formatNominal(input.value);});input.addEventListener('blur',()=>{input.value=formatNominal(input.value);}); };
 const dateID = d => d ? new Intl.DateTimeFormat('id-ID',{day:'2-digit',month:'short',year:'numeric'}).format(new Date(`${d}T00:00:00`)) : '—';
 const timeNow = d => d ? new Intl.DateTimeFormat('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(d)) : '—';
 const toast = (msg,type='ok') => { const el=document.createElement('div'); el.className=`toast ${type}`; el.textContent=msg; document.body.appendChild(el); setTimeout(()=>el.remove(),2800); };
@@ -107,17 +110,52 @@ function dashboard(){
 }
 function person(role,name,theme=''){return `<div class="person ${theme}"><small>${role}</small><b>${esc(name)}</b></div>`;}
 
+function programMonthCount(program){
+ if(!program?.tanggal_mulai||!program?.tanggal_selesai)return 1;
+ const start=new Date(`${program.tanggal_mulai}T00:00:00`),end=new Date(`${program.tanggal_selesai}T00:00:00`);
+ return Math.max(1,(end.getFullYear()-start.getFullYear())*12+end.getMonth()-start.getMonth()+1);
+}
+function jimpitanDisplayTotals(rows){
+ const totals=new Map();
+ const filled=new Map();
+ const payments=[...rows].sort((a,b)=>String(a.jimpitan_schedule?.tanggal||'').localeCompare(String(b.jimpitan_schedule?.tanggal||''))||String(a.confirmed_at||'').localeCompare(String(b.confirmed_at||'')));
+ payments.forEach(transaction=>{
+  const program=state.programs.find(x=>String(x.id)===String(transaction.jimpitan_schedule?.program_id||transaction.jimpitan_schedule?.jimpitan_program?.id))||transaction.jimpitan_schedule?.jimpitan_program;
+  const monthly=Number(program?.target_nominal||0)/programMonthCount(program);
+  let remaining=Number(transaction.nominal||0);
+  if(!remaining||!monthly)return;
+  const date=transaction.jimpitan_schedule?.tanggal;
+  let month=date?Number(date.slice(5,7))-1:0;
+  let guard=0;
+  while(remaining>0.0001&&guard<120){
+   const allocationKey=`${transaction.kk_id}:${program?.id||'program'}:${month}`;
+   const used=filled.get(allocationKey)||0;
+   const room=Math.max(0,monthly-used);
+   const allocation=Math.min(remaining,room);
+   if(allocation){
+    filled.set(allocationKey,used+allocation);
+    const totalKey=`${transaction.kk_id}:${month}`;
+    totals.set(totalKey,(totals.get(totalKey)||0)+allocation);
+    remaining-=allocation;
+   }
+   month++;guard++;
+  }
+ });
+ return (kkId,month)=>totals.get(`${kkId}:${month-1}`)||0;
+}
+
 function jimpitan(){
  const rows=state.reportTransactions||[];
  const selectedRt=state.reportRt==='all'?'all':Number(state.reportRt);
  const selectedProgram=state.reportProgram==='all'?null:state.programs.find(p=>String(p.id)===String(state.reportProgram));
  const visibleKks=state.kks.filter(k=>selectedRt==='all'||Number(k.rt)===selectedRt).filter(k=>!state.search||k.nama.toLowerCase().includes(state.search.toLowerCase()));
- const monthTotals=(kkId,m)=>rows.filter(x=>x.kk_id===kkId&&x.jimpitan_schedule?.tanggal?.slice(5,7)===String(m).padStart(2,'0')).reduce((a,x)=>a+Number(x.nominal||0),0);
+ const displayTotal=jimpitanDisplayTotals(rows);
+ const monthTotals=(kkId,m)=>displayTotal(kkId,m);
  const collectorNames=m=>{if(selectedRt==='all')return 'Pilih RT';const key=`${selectedRt}:${m}`;return state.matrixCollectorNames[key]||(()=>{const names=[...new Set(rows.filter(x=>(Number(x.kk?.rt)===selectedRt)&&x.jimpitan_schedule?.tanggal?.slice(5,7)===String(m).padStart(2,'0')).map(x=>x.penarikan_session?.nama_penarik).filter(Boolean).filter(x=>String(x).trim().toLowerCase()!=='admin'))];return names.length?names.join(', '):'—';})();};
  const grand=m=>visibleKks.reduce((a,k)=>a+monthTotals(k.id,m),0);
  return `<section class="section wide jimpitanPage"><div class="pageHero compactHero"><div><div class="eyebrow">◉ LAPORAN JIMPITAN</div><h1>JIMPITAN</h1><p>Bersama, Ringan di Tangan, Berat di Keikhlasan</p></div><div class="heroActionGroup">${state.session?`<button class="primary" id="newProgram">+ PROGRAM BARU</button><button class="secondary" data-nav="admin">KELOLA PROGRAM</button>`:`<button class="secondary" data-nav="laporan">LIHAT LAPORAN</button>`}</div></div>
  <div class="jimpitanToolbar"><div class="rtPills">${state.rts.map(r=>`<button class="rtPill ${String(state.reportRt)===String(r.id)?'active':''}" data-report-rt="${r.id}">${esc(r.nama)}</button>`).join('')}<button class="rtPill ${state.reportRt==='all'?'active':''}" data-report-rt="all">Semua</button></div><div class="jimpitanTools"><select id="reportProgram"><option value="all">Semua Jenis / Program</option>${state.programs.map(p=>`<option value="${p.id}" ${String(p.id)===String(state.reportProgram)?'selected':''}>${esc(p.nama_program)}</option>`).join('')}</select>${state.session?`<button class="secondary" id="addKK">+ KK</button><button class="secondary" id="importKK">Upload KK</button>`:''}</div></div>
- <div class="jimpitanMatrixPanel"><div class="matrixCaption"><div><b>${esc(selectedProgram?.nama_program||'Semua Program Jimpitan')}</b><span>${selectedProgram?`Target kumulatif ${money(selectedProgram.target_nominal)} / KK`:'Rekap nominal aktual per bulan'}</span></div><span>${selectedRt==='all'?'Semua RT':esc(rtName(selectedRt))} • ${state.reportYear}</span></div><div class="tableWrap matrixDarkWrap"><table class="jimpitanMatrix darkMatrix"><thead><tr><th class="sticky">No</th><th class="sticky second">Nama KK</th><th>Iuran</th>${MONTHS.map(m=>`<th>${m.slice(0,3).toUpperCase()}</th>`).join('')}<th>TOTAL</th></tr></thead><tbody>${visibleKks.length?visibleKks.map((k,i)=>{const vals=MONTHS.map((_,m)=>monthTotals(k.id,m+1));const total=vals.reduce((a,b)=>a+b,0);return `<tr><td class="sticky rowNo">${String(i+1).padStart(2,'0')}</td><td class="sticky second"><b>${esc(k.nama)}</b><small>${esc(rtName(k.rt))}</small></td><td>${selectedProgram?money(selectedProgram.target_nominal):'—'}</td>${vals.map(v=>`<td><span class="monthCell">${v?money(v):'Rp 0'}</span></td>`).join('')}<td><b>${total?money(total):'Rp 0'}</b></td></tr>`}).join(''):`<tr><td colspan="16" class="emptyCell">Belum ada data KK.</td></tr>`}</tbody><tfoot><tr><th class="sticky">—</th><th class="sticky second">TOTAL</th><th>—</th>${MONTHS.map((_,i)=>`<th>${grand(i+1)?money(grand(i+1)):'Rp 0'}</th>`).join('')}<th>${money(MONTHS.reduce((a,_,i)=>a+grand(i+1),0))}</th></tr><tr class="collectorRow"><th class="sticky">—</th><th class="sticky second">PENARIK</th><th>—</th>${MONTHS.map((_,i)=>`<th><div class="collectorNames">${esc(collectorNames(i+1))}</div></th>`).join('')}<th>—</th></tr></tfoot></table></div></div>
+ <div class="jimpitanMatrixPanel"><div class="matrixCaption"><div><b>${esc(selectedProgram?.nama_program||'Semua Program Jimpitan')}</b><span>${selectedProgram?`Target ${money(selectedProgram.target_nominal)} / KK • Rata-rata ${money(selectedProgram.target_nominal/programMonthCount(selectedProgram))} / bulan`:'Rata-rata cicilan per bulan'}</span></div><span>${selectedRt==='all'?'Semua RT':esc(rtName(selectedRt))} • ${state.reportYear}</span></div><div class="tableWrap matrixDarkWrap"><table class="jimpitanMatrix darkMatrix"><thead><tr><th class="sticky">No</th><th class="sticky second">Nama KK</th><th>Iuran</th>${MONTHS.map(m=>`<th>${m.slice(0,3).toUpperCase()}</th>`).join('')}<th>TOTAL</th></tr></thead><tbody>${visibleKks.length?visibleKks.map((k,i)=>{const vals=MONTHS.map((_,m)=>monthTotals(k.id,m+1));const total=vals.reduce((a,b)=>a+b,0);return `<tr><td class="sticky rowNo">${String(i+1).padStart(2,'0')}</td><td class="sticky second"><b>${esc(k.nama)}</b><small>${esc(rtName(k.rt))}</small></td><td>${selectedProgram?money(selectedProgram.target_nominal):'—'}</td>${vals.map(v=>`<td><span class="monthCell">${v?money(v):'Rp 0'}</span></td>`).join('')}<td><b>${total?money(total):'Rp 0'}</b></td></tr>`}).join(''):`<tr><td colspan="16" class="emptyCell">Belum ada data KK.</td></tr>`}</tbody><tfoot><tr><th class="sticky">—</th><th class="sticky second">TOTAL</th><th>—</th>${MONTHS.map((_,i)=>`<th>${grand(i+1)?money(grand(i+1)):'Rp 0'}</th>`).join('')}<th>${money(MONTHS.reduce((a,_,i)=>a+grand(i+1),0))}</th></tr><tr class="collectorRow"><th class="sticky">—</th><th class="sticky second">PENARIK</th><th>—</th>${MONTHS.map((_,i)=>`<th><div class="collectorNames">${esc(collectorNames(i+1))}</div></th>`).join('')}<th>—</th></tr></tfoot></table></div></div>
  <div class="jimpitanBottom"><div class="panel"><div class="panelTitle">JENIS JIMPITAN</div><div class="typeChips">${[...new Set(state.programs.map(p=>p.jenis).filter(Boolean))].map(x=>`<span>${esc(x)}</span>`).join('')||'<span class="emptyChip">Belum ada jenis</span>'}</div></div><div class="panel jimpitanHelp"><div class="panelTitle">ALUR PENARIKAN</div><p>Jadwal dibuat otomatis dari Program Jimpitan. Penarik mengisi identitas sendiri saat mulai penarikan, lalu setiap KK tetap tercatat termasuk nominal Rp0.</p><button class="secondary" data-nav="penarikan">BUKA PENARIKAN</button></div></div></section>`;
 }
 function programCard(p){return `<article class="programCard"><div class="programTop"><span class="badge">${esc(p.jenis)}</span><span class="badge ${p.aktif?'ok':''}">${p.aktif?'AKTIF':'NONAKTIF'}</span></div><h3>${esc(p.nama_program)}</h3><div class="programMeta"><span>Target</span><b>${money(p.target_nominal)}</b><span>Periode</span><b>${dateID(p.tanggal_mulai)} — ${dateID(p.tanggal_selesai)}</b><span>Frekuensi</span><b>${esc(FREQ[p.frekuensi]||p.frekuensi)}</b></div><div class="cardActions">${state.session?`<button class="secondary small" data-edit-program="${p.id}">Edit</button><button class="dangerText" data-toggle-program="${p.id}">${p.aktif?'Nonaktifkan':'Aktifkan'}</button>`:''}</div></article>`;}
@@ -181,7 +219,7 @@ function penarikanActive(){
 function transactionCard(k,s,session){
  const t=state.transactions.find(x=>x.kk_id===k.id);
  const done=!!t;
- return `<div class="collectionCard ${done?'done':''}"><div class="collectionName"><b>${esc(k.nama)}</b><span>${esc(rtName(k.rt))}</span></div><div class="moneyInput"><input type="number" min="0" step="1000" value="${done?Number(t.nominal):''}" placeholder="0" data-nominal="${k.id}" ${done?'disabled':''}><span>Rp</span></div><button class="confirmBtn" data-confirm-kk="${k.id}" ${done?'disabled':''}>${done?'✓ Tercatat':'✓ Konfirmasi'}</button>${done?`<div class="confirmed">✓ ${statusLabel(t.nominal)} • ${timeNow(t.confirmed_at)}</div>`:''}</div>`;
+ return `<div class="collectionCard ${done?'done':''}"><div class="collectionName"><b>${esc(k.nama)}</b><span>${esc(rtName(k.rt))}</span></div><div class="moneyInput"><input type="text" inputmode="numeric" value="${done?formatNominal(t.nominal):''}" placeholder="0" data-nominal="${k.id}" ${done?'disabled':''}><span>Rp</span></div><button class="confirmBtn" data-confirm-kk="${k.id}" ${done?'disabled':''}>${done?'✓ Tercatat':'✓ Konfirmasi'}</button>${done?`<div class="confirmed">✓ ${statusLabel(t.nominal)} • ${timeNow(t.confirmed_at)}</div>`:''}</div>`;
 }
 
 function laporan(){
@@ -257,7 +295,7 @@ async function saveMatrixNominal(kkId,month,input){
  const kk=state.kks.find(x=>String(x.id)===String(kkId));
  const program=state.reportProgram==='all'?null:state.programs.find(x=>String(x.id)===String(state.reportProgram));
  if(!kk||!program)return toast('Pilih program jimpitan terlebih dahulu','err');
- const value=Math.max(0,Number(input.value||0));
+ const value=parseNominal(input.value);
  const schedule=state.schedules.find(x=>x.program_id===program.id&&Number(x.rt)===Number(kk.rt)&&String(x.tanggal).slice(0,4)===String(state.reportYear)&&Number(String(x.tanggal).slice(5,7))===month);
  if(!schedule)return toast('Jadwal bulan ini belum tersedia untuk RT tersebut','err');
  let {data:sessions,error:sessionError}=await supabase.from('penarikan_session').select('*').eq('schedule_id',schedule.id).order('started_at',{ascending:false}).limit(1);
@@ -281,7 +319,7 @@ function bindJimpitanMatrix(){
   [...table.tBodies[0].rows].forEach(row=>{
    const nameCell=row.cells[1],monthCell=row.cells[index+3];if(!nameCell||!monthCell)return;
    monthCell.classList.toggle('monthCompact',compact);
-  if(state.session&&!monthCell.dataset.matrixAmountReady){const text=monthCell.textContent.replace(/[^0-9]/g,'');const value=text?Number(text):0;monthCell.innerHTML=`<div class="matrixAmountEdit"><input type="number" min="0" step="1000" value="${value}" aria-label="Nominal bulan"><button type="button" title="Simpan nominal">✓</button></div>`;const name=nameCell.querySelector('input')?.value||nameCell.querySelector('b')?.textContent.trim();const kk=state.kks.find(x=>x.nama===name);if(kk)monthCell.querySelector('button').onclick=()=>saveMatrixNominal(kk.id,month,monthCell.querySelector('input'));monthCell.dataset.matrixAmountReady='true';}
+  if(state.session&&!monthCell.dataset.matrixAmountReady){const text=monthCell.textContent.replace(/[^0-9]/g,'');const value=text?Number(text):0;monthCell.innerHTML=`<div class="matrixAmountEdit"><input type="text" inputmode="numeric" value="${value?formatNominal(value):''}" placeholder="0" aria-label="Nominal bulan"><button type="button" title="Simpan nominal">✓</button></div>`;const amountInput=monthCell.querySelector('input');bindNominalInput(amountInput);const name=nameCell.querySelector('input')?.value||nameCell.querySelector('b')?.textContent.trim();const kk=state.kks.find(x=>x.nama===name);if(kk)monthCell.querySelector('button').onclick=()=>saveMatrixNominal(kk.id,month,amountInput);monthCell.dataset.matrixAmountReady='true';}
   });
  });
 }
@@ -297,6 +335,7 @@ function editKKModal(id){
 }
 function bind(){
  bindJimpitanMatrix();
+ document.querySelectorAll('[data-nominal]:not(:disabled)').forEach(bindNominalInput);
  document.querySelector('.jimpitanPage .rtPill[data-report-rt="all"]')?.remove();
  const exportPanel=document.querySelector('.jimpitanPage .jimpitanHelp');
  if(exportPanel){exportPanel.innerHTML='<div class="panelTitle">EXPORT REKAP NOMINAL</div><p>Export per bulan atau rentang bulan. File hanya berisi total nominal tanpa nama KK.</p><button class="secondary" id="openJimpitanExport">EXPORT PDF / CSV</button>';document.querySelector('#openJimpitanExport').onclick=openJimpitanExport;}
@@ -443,7 +482,7 @@ async function correctTransaction(id){
 }
 async function confirmTransaction(kkId){
  const s=state.schedules.find(x=>String(x.id)===String(state.selectedSchedule));const session=state.sessions[0];if(!s||!session)return;
- const input=document.querySelector(`[data-nominal="${kkId}"]`);const nominal=Math.max(0,Number(input?.value||0));
+ const input=document.querySelector(`[data-nominal="${kkId}"]`);const nominal=parseNominal(input?.value);
  const {data:existing}=await supabase.from('jimpitan_transaction').select('id').eq('schedule_id',s.id).eq('kk_id',kkId).maybeSingle();
  if(existing)return toast('KK ini sudah dicatat.','err');
  const {error}=await supabase.from('jimpitan_transaction').insert({schedule_id:s.id,session_id:session.id,kk_id:kkId,nominal,confirmed_at:new Date().toISOString(),confirmed_by:null});
