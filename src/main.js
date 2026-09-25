@@ -129,7 +129,7 @@ function scheduleList(){
 
 function dataKK(){
  const grouped=state.rts.map(r=>({...r,kks:state.kks.filter(k=>Number(k.rt)===Number(r.id)&&(!state.search||k.nama.toLowerCase().includes(state.search.toLowerCase())))}));
- return `<section class="section wide"><div class="sectionHead"><div><div class="eyebrow">DATA KK</div><h2>Data KK per RT</h2><p class="muted">Urutan otomatis A–Z. KK tidak hilang hanya karena nominal penarikan Rp0.</p></div>${state.session?`<div class="cardActions"><button class="primary" id="addKK">+ Tambah KK</button><button class="secondary" id="importKK">Import PDF / Excel / CSV</button></div>`:''}</div>
+ return `<section class="section wide"><div class="sectionHead"><div><div class="eyebrow">DATA KK</div><h2>Data KK per RT</h2><p class="muted">Urutan otomatis A–Z. KK tidak hilang hanya karena nominal penarikan Rp0.</p></div>${state.session?`<div class="cardActions"><button class="primary" id="addKK">+ Tambah KK</button><button class="secondary" id="importKK">Import PDF / Excel / CSV / TXT</button></div>`:''}</div>
  <div class="toolbar"><select id="kkRt"><option value="all">Semua wilayah</option>${state.rts.map(r=>`<option value="${r.id}" ${String(state.rt)===String(r.id)?'selected':''}>${esc(r.nama)}</option>`).join('')}</select><input id="kkSearch" value="${esc(state.search)}" placeholder="Cari nama KK…"></div>
  <div class="rtDataGrid">${grouped.map(g=>`<article class="panel"><div class="panelTitle">${esc(g.nama)} <span class="count">${g.kks.length}</span></div><ol class="kkList">${g.kks.map(k=>`<li><b>${esc(k.nama)}</b>${state.session?`<span><button class="linkBtn" data-history-kk="${k.id}">Riwayat</button><button class="dangerText" data-delete-kk="${k.id}">Nonaktifkan</button></span>`:''}</li>`).join('')||'<li class="muted">Belum ada KK.</li>'}</ol></article>`).join('')}</div></section>`;
 }
@@ -287,7 +287,7 @@ function bindJimpitanMatrix(){
 }
 function adminKKContent(){
  const selected=state.adminKKRt?state.rts.find(r=>String(r.id)===String(state.adminKKRt)):null;const kks=selected?state.kks.filter(k=>Number(k.rt)===Number(selected.id)):[];
- return `<div class="panelTitle">DATA KK PER RT</div><p class="muted">Pilih RT untuk melihat dan mengelola daftar KK.</p><div class="cardActions"><button class="primary" data-add-kk>+ Tambah KK</button><button class="secondary" id="importKK">Import PDF / Excel / CSV</button></div><div class="adminRtPills">${state.rts.map(rt=>`<button class="rtPill ${String(state.adminKKRt)===String(rt.id)?'active':''}" data-admin-kk-rt="${rt.id}">${esc(rt.nama)} <small>${state.kks.filter(k=>Number(k.rt)===Number(rt.id)).length}</small></button>`).join('')}</div>${selected?`<div class="adminRtGroup"><div class="adminRtHeader"><b>${esc(selected.nama)}</b><span>${kks.length} KK</span></div><div class="adminList">${kks.map(k=>`<div class="adminItem"><div><b>${esc(k.nama)}</b><span>KK aktif</span></div><div><button class="secondary small" data-edit-kk="${k.id}">Edit</button><button class="dangerText" data-delete-kk="${k.id}">Nonaktifkan</button></div></div>`).join('')||'<div class="muted">Belum ada KK di wilayah ini.</div>'}</div></div>`:'<div class="adminKKEmpty">Klik salah satu pill RT untuk menampilkan data KK.</div>'}`;
+ return `<div class="panelTitle">DATA KK PER RT</div><p class="muted">Pilih RT untuk melihat dan mengelola daftar KK.</p><div class="cardActions"><button class="primary" data-add-kk>+ Tambah KK</button><button class="secondary" id="importKK">Import PDF / Excel / CSV / TXT</button></div><div class="adminRtPills">${state.rts.map(rt=>`<button class="rtPill ${String(state.adminKKRt)===String(rt.id)?'active':''}" data-admin-kk-rt="${rt.id}">${esc(rt.nama)} <small>${state.kks.filter(k=>Number(k.rt)===Number(rt.id)).length}</small></button>`).join('')}</div>${selected?`<div class="adminRtGroup"><div class="adminRtHeader"><b>${esc(selected.nama)}</b><span>${kks.length} KK</span></div><div class="adminList">${kks.map(k=>`<div class="adminItem"><div><b>${esc(k.nama)}</b><span>KK aktif</span></div><div><button class="secondary small" data-edit-kk="${k.id}">Edit</button><button class="dangerText" data-delete-kk="${k.id}">Nonaktifkan</button></div></div>`).join('')||'<div class="muted">Belum ada KK di wilayah ini.</div>'}</div></div>`:'<div class="adminKKEmpty">Klik salah satu pill RT untuk menampilkan data KK.</div>'}`;
 }
 function editKKModal(id){
  if(!authRequired())return;
@@ -509,7 +509,7 @@ function importKKModal(){
  if(!authRequired())return;
  const input=document.createElement('input');
  input.type='file';
- input.accept='.csv,.xlsx,.xls,.pdf';
+ input.accept='.txt,.csv,.xlsx,.xls,.pdf';
  input.onchange=()=>{const file=input.files?.[0];if(file)selectImportRTModal(file);};
  input.click();
 }
@@ -531,7 +531,7 @@ async function parseImport(file,rt){
  try{
   let names=[];
   const lower=file.name.toLowerCase();
-  if(lower.endsWith('.csv')){
+  if(lower.endsWith('.txt')||lower.endsWith('.csv')){
    const text=await file.text();
    names=parseTextNames(text);
   } else if(/\.(xlsx|xls)$/i.test(file.name)){
@@ -549,7 +549,7 @@ async function parseImport(file,rt){
    }
    toast(`PDF terbaca: ${names.length} baris nama.`, 'ok');
   } else {
-   return toast('Format file tidak didukung. Gunakan PDF, Excel, atau CSV.','err');
+    return toast('Format file tidak didukung. Gunakan TXT, PDF, Excel, atau CSV.','err');
   }
 
   // Hapus nomor/baris header, tetapi JANGAN melakukan Set() global.
@@ -559,7 +559,7 @@ async function parseImport(file,rt){
    .filter(Boolean)
    .filter(x=>!isKKHeader(x));
 
-  if(!names.length)return toast('Tidak menemukan nama KK. Periksa format PDF/Excel/CSV.','err');
+  if(!names.length)return toast('Tidak menemukan nama KK. Periksa format TXT/PDF/Excel/CSV.','err');
 
   const {error}=await supabase.from('kk').insert(names.map(n=>({nama:n,rt,aktif:true})));
   if(error)throw error;
