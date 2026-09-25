@@ -291,7 +291,7 @@ async function saveMatrixCollectorName(month,year,input){
  const program=state.reportProgram==='all'?null:state.programs.find(x=>String(x.id)===String(state.reportProgram));
  if(program){
   const selectedRt=state.reportRt==='all'?null:Number(state.reportRt);
-  const schedules=state.schedules.filter(x=>x.program_id===program.id&&String(x.tanggal).slice(0,4)===String(state.reportYear)&&Number(String(x.tanggal).slice(5,7))===month&&(!selectedRt||Number(x.rt)===selectedRt));
+  const schedules=state.schedules.filter(x=>x.program_id===program.id&&String(x.tanggal).slice(0,4)===String(year)&&Number(String(x.tanggal).slice(5,7))===month+1&&(!selectedRt||Number(x.rt)===selectedRt));
   const ids=schedules.map(x=>x.id);
   if(ids.length){const {data:sessions,error}=await supabase.from('penarikan_session').select('id').in('schedule_id',ids);if(error){toast(error.message,'err');return;}for(const session of sessions||[]){const {error:updateError}=await supabase.from('penarikan_session').update({nama_penarik:name,identitas:'Input tabel'}).eq('id',session.id);if(updateError){toast(updateError.message,'err');return;}}}
  }
@@ -300,7 +300,9 @@ async function saveMatrixCollectorName(month,year,input){
 async function saveMatrixNominal(kkId,year,month,input){
  if(!authRequired())return;
  const kk=state.kks.find(x=>String(x.id)===String(kkId));
- const program=state.reportProgram==='all'?null:state.programs.find(x=>String(x.id)===String(state.reportProgram));
+ const selectedProgram=state.reportProgram==='all'?null:state.programs.find(x=>String(x.id)===String(state.reportProgram));
+ const matchingPrograms=state.programs.filter(candidate=>state.schedules.some(schedule=>schedule.program_id===candidate.id&&Number(schedule.rt)===Number(kk?.rt)&&String(schedule.tanggal).slice(0,4)===String(year)&&Number(String(schedule.tanggal).slice(5,7))===month+1));
+ const program=selectedProgram||matchingPrograms[0];
  if(!kk||!program)return toast('Pilih program jimpitan terlebih dahulu','err');
  const value=parseNominal(input.value);
  const schedule=state.schedules.find(x=>x.program_id===program.id&&Number(x.rt)===Number(kk.rt)&&String(x.tanggal).slice(0,4)===String(year)&&Number(String(x.tanggal).slice(5,7))===month+1);
@@ -309,7 +311,7 @@ async function saveMatrixNominal(kkId,year,month,input){
  if(sessionError){toast(sessionError.message,'err');return;}
  let session=sessions?.[0];
  if(!session||session.nama_penarik==='Admin'){const collectorName=state.matrixCollectorNames[`${Number(kk.rt)}:${year}:${month+1}`]||await collectorNameModal();if(!collectorName)return;if(session){const result=await supabase.from('penarikan_session').update({nama_penarik:collectorName,identitas:'Input tabel'}).eq('id',session.id).select().single();if(result.error){toast(result.error.message,'err');return;}session=result.data;}else{const result=await supabase.from('penarikan_session').insert({schedule_id:schedule.id,nama_penarik:collectorName,identitas:'Input tabel',status:'active'}).select().single();if(result.error){toast(result.error.message,'err');return;}session=result.data;}}
- const existing=state.reportTransactions?.find(x=>x.kk_id===kk.id&&x.schedule_id===schedule.id);
+ const existing=state.reportTransactions?.find(x=>String(x.kk_id)===String(kk.id)&&String(x.schedule_id)===String(schedule.id));
  const query=existing?supabase.from('jimpitan_transaction').update({nominal:value,updated_at:new Date().toISOString(),updated_by:state.session.user.id}).eq('id',existing.id):supabase.from('jimpitan_transaction').insert({schedule_id:schedule.id,session_id:session.id,kk_id:kk.id,nominal:value,confirmed_by:state.session.user.id,updated_by:state.session.user.id});
  const {error}=await query;if(error){toast(error.message,'err');return;}
  toast('Nominal tersimpan');await loadAll();await loadReport();render();
@@ -503,11 +505,12 @@ async function finishCollection(){
  if(error)return toast(error.message,'err');
  await supabase.from('jimpitan_schedule').update({status:'finished'}).eq('id',s.id);state.sessions=[];state.selectedSchedule='';await loadAll();go('penarikan');
 }
-async function loadReport(){
+async function loadReport(dateRange=null){
  if(!supabase)return;
  let q=supabase.from('jimpitan_transaction').select('*, kk(nama,rt), penarikan_session(nama_penarik), jimpitan_schedule(tanggal,program_id,jimpitan_program(nama_program,jenis,target_nominal))');
  const matrixProgram=state.view==='jimpitan'&&state.reportProgram!=='all'?state.programs.find(x=>String(x.id)===String(state.reportProgram)):null;
- if(matrixProgram?.tanggal_mulai&&matrixProgram?.tanggal_selesai)q=q.gte('jimpitan_schedule.tanggal',matrixProgram.tanggal_mulai).lte('jimpitan_schedule.tanggal',matrixProgram.tanggal_selesai);
+ if(dateRange){const endDate=new Date(dateRange.endYear,dateRange.endMonth,0).toISOString().slice(0,10);q=q.gte('jimpitan_schedule.tanggal',`${dateRange.startYear}-${String(dateRange.startMonth).padStart(2,'0')}-01`).lte('jimpitan_schedule.tanggal',endDate);}
+ else if(matrixProgram?.tanggal_mulai&&matrixProgram?.tanggal_selesai)q=q.gte('jimpitan_schedule.tanggal',matrixProgram.tanggal_mulai).lte('jimpitan_schedule.tanggal',matrixProgram.tanggal_selesai);
  else if(state.reportYear)q=q.gte('jimpitan_schedule.tanggal',`${state.reportYear}-01-01`).lte('jimpitan_schedule.tanggal',`${state.reportYear}-12-31`);
  const {data,error}=await q.order('confirmed_at',{ascending:true});if(error){toast(error.message,'err');return;}
  state.reportTransactions=(data||[]).filter(x=>{
@@ -522,37 +525,38 @@ async function exportExcel(){
  const ws=XLSX.utils.aoa_to_sheet(rows),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Transaksi');XLSX.writeFile(wb,`laporan-jimpitan-${state.reportYear}.xlsx`);
 }
 function exportPdf(){window.print();}
-function jimpitanExportRows(startMonth,endMonth,rtFilter=state.reportRt){
+function jimpitanExportRows(startMonth,startYear,endMonth,endYear,rtFilter=state.reportRt){
  const transactions=state.reportTransactions||[],selectedRt=rtFilter==='all'?'all':Number(rtFilter),households=state.kks.filter(kk=>selectedRt==='all'||Number(kk.rt)===selectedRt),rows=[];
  const householdIds=new Set(households.map(kk=>String(kk.id)));
  transactions.forEach(transaction=>{if(!householdIds.has(String(transaction.kk_id))){const kk=transaction.kk;if(kk&&(selectedRt==='all'||Number(kk.rt)===selectedRt))households.push(kk);}});
- for(let month=startMonth;month<=endMonth;month++)households.forEach(kk=>{
-  const nominal=transactions.filter(transaction=>String(transaction.kk_id)===String(kk.id)&&Number(String(transaction.jimpitan_schedule?.tanggal||'').slice(5,7))===month).reduce((sum,transaction)=>sum+Number(transaction.nominal||0),0);
-  rows.push({month,monthName:MONTHS[month-1],rt:rtName(kk.rt),kkName:kk.nama||'—',nominal});
- });
- return rows.sort((a,b)=>a.month-b.month||a.rt.localeCompare(b.rt)||a.kkName.localeCompare(b.kkName));
+ for(let cursor=startYear*12+startMonth-1;cursor<=endYear*12+endMonth-1;cursor++){const year=Math.floor(cursor/12),month=cursor%12+1;households.forEach(kk=>{
+  const nominal=transactions.filter(transaction=>String(transaction.kk_id)===String(kk.id)&&Number(String(transaction.jimpitan_schedule?.tanggal||'').slice(0,4))===year&&Number(String(transaction.jimpitan_schedule?.tanggal||'').slice(5,7))===month).reduce((sum,transaction)=>sum+Number(transaction.nominal||0),0);
+  rows.push({month,year,monthName:`${MONTHS[month-1]} ${year}`,rt:rtName(kk.rt),kkName:kk.nama||'—',nominal});
+ });}
+ return rows.sort((a,b)=>a.year-b.year||a.month-b.month||a.rt.localeCompare(b.rt)||a.kkName.localeCompare(b.kkName));
 }
 async function openJimpitanExport(){
  if(!state.reportTransactions?.length)await loadReport();
- modal(`<div class="modalCard compact"><div class="modalHead"><div><div class="eyebrow">EXPORT JIMPITAN</div><h3>Rekap Nominal</h3><p class="muted">Dengan nama KK. Pilih RT dan satu bulan atau rentang bulan.</p></div><button class="modalClose" data-close-modal>×</button></div><label>RT yang diexport<select id="exportRt"><option value="all">Semua RT</option>${state.rts.map(r=>`<option value="${r.id}" ${String(state.reportRt)===String(r.id)?'selected':''}>${esc(r.nama)}</option>`).join('')}</select></label><label class="exportAllLabel"><input id="exportAllMonths" type="checkbox"><span>Semua bulan tahun ${state.reportYear}</span></label><div class="twoCol"><label>Dari bulan<select id="exportStartMonth">${MONTHS.map((m,i)=>`<option value="${i+1}">${m}</option>`).join('')}</select></label><label>Sampai bulan<select id="exportEndMonth">${MONTHS.map((m,i)=>`<option value="${i+1}" ${i===11?'selected':''}>${m}</option>`).join('')}</select></label></div><div class="modalActions"><button class="secondary" data-close-modal>Batal</button><button class="secondary" id="exportJimpitanCsv">CSV</button><button class="primary" id="exportJimpitanPdf">PDF A4</button></div></div>`, 'exportRt');
- const getRange=()=>{if(document.querySelector('#exportAllMonths').checked)return [1,12];const start=Number(document.querySelector('#exportStartMonth').value),end=Number(document.querySelector('#exportEndMonth').value);if(start>end){toast('Bulan mulai tidak boleh setelah bulan akhir','err');return null;}return [start,end];};
+ modal(`<div class="modalCard compact"><div class="modalHead"><div><div class="eyebrow">EXPORT JIMPITAN</div><h3>Rekap Nominal</h3><p class="muted">Dengan nama KK. Pilih RT dan rentang bulan.</p></div><button class="modalClose" data-close-modal>×</button></div><label>RT yang diexport<select id="exportRt"><option value="all">Semua RT</option>${state.rts.map(r=>`<option value="${r.id}" ${String(state.reportRt)===String(r.id)?'selected':''}>${esc(r.nama)}</option>`).join('')}</select></label><label class="exportAllLabel"><input id="exportAllMonths" type="checkbox"><span>Semua bulan tahun ${state.reportYear}</span></label><div class="twoCol"><label>Dari bulan<select id="exportStartMonth">${MONTHS.map((m,i)=>`<option value="${i+1}">${m}</option>`).join('')}</select></label><label>Tahun<select id="exportStartYear">${[state.reportYear,state.reportYear+1].map(y=>`<option value="${y}">${y}</option>`).join('')}</select></label><label>Sampai bulan<select id="exportEndMonth">${MONTHS.map((m,i)=>`<option value="${i+1}" ${i===11?'selected':''}>${m}</option>`).join('')}</select></label><label>Tahun<select id="exportEndYear"><option value="${state.reportYear}">${state.reportYear}</option><option value="${state.reportYear+1}" selected>${state.reportYear+1}</option></select></label></div><div class="modalActions"><button class="secondary" data-close-modal>Batal</button><button class="secondary" id="exportJimpitanCsv">CSV</button><button class="primary" id="exportJimpitanPdf">PDF A4</button></div></div>`, 'exportRt');
+ const getRange=()=>{if(document.querySelector('#exportAllMonths').checked)return [1,state.reportYear,12,state.reportYear];const start=Number(document.querySelector('#exportStartMonth').value),startYear=Number(document.querySelector('#exportStartYear').value),end=Number(document.querySelector('#exportEndMonth').value),endYear=Number(document.querySelector('#exportEndYear').value);if(startYear*12+start>endYear*12+end){toast('Bulan mulai tidak boleh setelah bulan akhir','err');return null;}return [start,startYear,end,endYear];};
  document.querySelector('#exportAllMonths').onchange=e=>{document.querySelector('#exportStartMonth').disabled=e.target.checked;document.querySelector('#exportEndMonth').disabled=e.target.checked;};
- const exportWithRt=async(type)=>{const range=getRange();if(!range)return;const selectedRt=document.querySelector('#exportRt').value,previousRt=state.reportRt,previousMonth=state.reportMonth;state.reportRt=selectedRt;state.reportMonth='all';await loadReport();if(type==='csv')exportJimpitanCsv(...range,selectedRt);else exportJimpitanPdf(...range,selectedRt);state.reportRt=previousRt;state.reportMonth=previousMonth;await loadReport();};
+ const exportWithRt=async(type)=>{const range=getRange();if(!range)return;const selectedRt=document.querySelector('#exportRt').value,previousRt=state.reportRt,previousMonth=state.reportMonth;state.reportRt=selectedRt;state.reportMonth='all';const [startMonth,startYear,endMonth,endYear]=range;await loadReport({startMonth,startYear,endMonth,endYear});if(type==='csv')exportJimpitanCsv(...range,selectedRt);else exportJimpitanPdf(...range,selectedRt);state.reportRt=previousRt;state.reportMonth=previousMonth;await loadReport();};
  document.querySelector('#exportJimpitanCsv').onclick=()=>exportWithRt('csv');
  document.querySelector('#exportJimpitanPdf').onclick=()=>exportWithRt('pdf');
 }
-function exportJimpitanCsv(startMonth,endMonth,rtFilter=state.reportRt){
- const rows=jimpitanExportRows(startMonth,endMonth,rtFilter),rt=rtFilter==='all'?'Semua RT':rtName(rtFilter),csv=[['Rekap Jimpitan',`${rt} - ${state.reportYear}`],['Bulan','RT','Nama KK','Nominal'],...rows.map(row=>[row.monthName,row.rt,row.kkName,row.nominal])].map(row=>row.map(value=>`"${String(value).replace(/"/g,'""')}"`).join(',')).join('\r\n');
- const link=document.createElement('a');link.href=URL.createObjectURL(new Blob([`\uFEFF${csv}`],{type:'text/csv;charset=utf-8'}));link.download=`rekap-jimpitan-${state.reportYear}-${startMonth}-${endMonth}.csv`;link.click();URL.revokeObjectURL(link.href);closeModal();
+function exportJimpitanCsv(startMonth,startYear,endMonth,endYear,rtFilter=state.reportRt){
+ const rows=jimpitanExportRows(startMonth,startYear,endMonth,endYear,rtFilter),rt=rtFilter==='all'?'Semua RT':rtName(rtFilter),csv=[['Rekap Jimpitan',`${rt} - ${startYear} sampai ${endYear}`],['Bulan','RT','Nama KK','Nominal'],...rows.map(row=>[row.monthName,row.rt,row.kkName,row.nominal])].map(row=>row.map(value=>`"${String(value).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+ const link=document.createElement('a');link.href=URL.createObjectURL(new Blob([`\uFEFF${csv}`],{type:'text/csv;charset=utf-8'}));link.download=`rekap-jimpitan-${startYear}-${startMonth}-${endYear}-${endMonth}.csv`;link.click();URL.revokeObjectURL(link.href);closeModal();
 }
-function exportJimpitanPdf(startMonth,endMonth,rtFilter=state.reportRt){
- const rows=jimpitanExportRows(startMonth,endMonth,rtFilter),rt=rtFilter==='all'?'Semua RT':rtName(rtFilter),program=state.reportProgram==='all'?'Semua Program':state.programs.find(x=>String(x.id)===String(state.reportProgram))?.nama_program||'Program';
- const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'}),formatMoney=value=>`Rp ${new Intl.NumberFormat('id-ID').format(value)}`,page={left:12,right:198,top:43,bottom:285},columnGap=6,columnWidth=(page.right-page.left-columnGap)/2,rowHeight=7,total=rows.reduce((sum,row)=>sum+row.nominal,0);
- const drawColumn=(columnRows,x)=>{let y=page.top;doc.setFillColor(235,235,235);doc.rect(x,y,columnWidth,8,'F');doc.rect(x,y,columnWidth,8);doc.setFont('helvetica','bold');doc.setFontSize(7);doc.text('Bulan',x+2,y+5);doc.text('Nama KK',x+21,y+5);doc.text('Nominal',x+columnWidth-2,y+5,{align:'right'});doc.setFont('helvetica','normal');columnRows.forEach(row=>{y+=8;doc.rect(x,y,columnWidth,8);doc.text(row.monthName.slice(0,3),x+2,y+5);doc.text(`${row.kkName} (${row.rt})`,x+21,y+5,{maxWidth:columnWidth-47});doc.text(formatMoney(row.nominal),x+columnWidth-2,y+5,{align:'right'});});return y+8;};
- const drawHeader=()=>{doc.setFont('helvetica','bold');doc.setFontSize(16);doc.text('Rekap Jimpitan',page.left,22);doc.setFont('helvetica','normal');doc.setFontSize(9);doc.text(`${rt} | ${program} | Tahun ${state.reportYear}`,page.left,29);doc.setFontSize(8);doc.text('Rincian nominal per nama KK',page.left,35);};
- const rowsPerColumn=Math.floor((page.bottom-page.top-8)/8),rowsPerPage=rowsPerColumn*2;
- for(let offset=0;offset<rows.length||offset===0;offset+=rowsPerPage){if(offset)doc.addPage();drawHeader();drawColumn(rows.slice(offset,offset+rowsPerColumn),page.left);drawColumn(rows.slice(offset+rowsPerColumn,offset+rowsPerPage),page.left+columnWidth+columnGap);}
- const totalY=page.bottom+7;doc.setFont('helvetica','bold');doc.setFontSize(9);doc.text(`TOTAL: ${formatMoney(total)} | ${rows.length} baris`,page.left,totalY);doc.save(`rekap-jimpitan-${state.reportYear}-${startMonth}-${endMonth}.pdf`);closeModal();
+function exportJimpitanPdf(startMonth,startYear,endMonth,endYear,rtFilter=state.reportRt){
+ const rows=jimpitanExportRows(startMonth,startYear,endMonth,endYear,rtFilter),rt=rtFilter==='all'?'Semua RT':rtName(rtFilter),program=state.reportProgram==='all'?'Semua Program':state.programs.find(x=>String(x.id)===String(state.reportProgram))?.nama_program||'Program';
+ const months=[];for(let cursor=startYear*12+startMonth-1;cursor<=endYear*12+endMonth-1;cursor++){const year=Math.floor(cursor/12),month=cursor%12+1;months.push({year,month,label:`${MONTHS[month-1]} ${year}`,key:`${year}-${month}`});}
+ const groups=new Map();rows.forEach(row=>{const key=`${row.rt}|${row.kkName}`,group=groups.get(key)||{rt:row.rt,kkName:row.kkName,values:{},total:0};group.values[`${row.year}-${row.month}`]=row.nominal;group.total+=row.nominal;groups.set(key,group);});
+ const groupRows=[...groups.values()],doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'}),formatMoney=value=>`Rp ${new Intl.NumberFormat('id-ID').format(value)}`,page={left:7,right:290,top:27,bottom:197},fixedWidth=8+18+48+20,monthWidth=(page.right-page.left-fixedWidth)/months.length,headerHeight=8,rowHeight=Math.max(1.4,Math.min(6,(page.bottom-page.top-headerHeight-8)/(groupRows.length+1))),fontSize=rowHeight<2.5?3:5,total=groupRows.reduce((sum,row)=>sum+row.total,0);
+ doc.setFont('helvetica','bold');doc.setFontSize(15);doc.text('Rekap Jimpitan',page.left,10);doc.setFont('helvetica','normal');doc.setFontSize(7);doc.text(`${rt} | ${program} | ${startYear} sampai ${endYear}`,page.left,16);doc.setFontSize(6);doc.text('Nominal transaksi asli per bulan',page.left,21);
+ const columns=[{label:'No',width:8},{label:'RT',width:18},{label:'Nama KK',width:48},...months.map(month=>({label:MONTHS[month.month-1],year:String(month.year),width:monthWidth})),{label:'TOTAL',width:20}];let x=page.left;doc.setTextColor(0,0,0);doc.setFont('helvetica','bold');doc.setFontSize(Math.min(fontSize,4.5));columns.forEach(column=>{doc.setFillColor(255,255,255);doc.setDrawColor(70,70,70);doc.rect(x,page.top,column.width,headerHeight,'FD');const headerText=column.year?`${column.label} ${column.year}`:column.label;doc.text(headerText,x+column.width/2,page.top+headerHeight*.68,{align:'center',maxWidth:column.width-1});x+=column.width;});doc.setTextColor(0,0,0);
+ groupRows.forEach((row,index)=>{let y=page.top+headerHeight+rowHeight*index;x=page.left;const cells=[String(index+1),row.rt,row.kkName,...months.map(month=>row.values[month.key]?formatMoney(row.values[month.key]):'—'),formatMoney(row.total)];columns.forEach((column,columnIndex)=>{doc.setFont('helvetica',columnIndex===columns.length-1?'bold':'normal');doc.rect(x,y,column.width,rowHeight);doc.text(cells[columnIndex],x+(columnIndex===2?1:column.width/2),y+rowHeight*.68,{align:columnIndex===2?'left':'center',maxWidth:column.width-2});x+=column.width;});});
+ const totalY=Math.min(page.bottom+5,page.top+headerHeight+rowHeight*groupRows.length+5);doc.setFont('helvetica','bold');doc.setFontSize(7);doc.text(`TOTAL PERIODE: ${formatMoney(total)} | ${groupRows.length} KK`,page.left,totalY);doc.save(`rekap-jimpitan-${startYear}-${startMonth}-${endYear}-${endMonth}.pdf`);closeModal();
 }
 function importKKModal(){
  if(!authRequired())return;
